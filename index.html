@@ -1,0 +1,410 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Boon Yazıcı Testi</title>
+<style>
+  :root {
+    --bg: #F4F1EA; --card: #FFFEFB; --line: #E3DED3; --text: #1C1F23; --muted: #5B6068;
+    --accent: #2F5D4A; --ok: #5E8C6E; --warn: #C08A3E; --bad: #A6533A;
+    font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-variant-numeric: tabular-nums;
+    color: var(--text); background: var(--bg);
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; }
+  main { max-width: 640px; margin: 0 auto; padding: 16px 16px 48px; display: flex; flex-direction: column; gap: 16px; }
+  h1 { font-weight: 300; font-size: 28px; margin: 8px 0 0; }
+  h2 { font-size: 16px; margin: 0 0 8px; }
+  p { margin: 0 0 8px; line-height: 1.45; }
+  .muted { color: var(--muted); font-size: 14px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
+  button {
+    font: inherit; font-weight: 600; border: 0; border-radius: 12px; min-height: 52px; padding: 0 16px;
+    background: var(--accent); color: #fff; cursor: pointer; width: 100%;
+  }
+  button.secondary { background: var(--card); color: var(--text); border: 1px solid var(--line); }
+  button:disabled { opacity: 0.5; }
+  .row { display: flex; gap: 8px; }
+  .row > * { flex: 1; }
+  label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
+  input, select, textarea {
+    font: inherit; color: var(--text); background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 10px;
+  }
+  textarea { font-family: ui-monospace, Menlo, monospace; font-size: 12px; min-height: 220px; }
+  .checks { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
+  .yes { color: var(--ok); font-weight: 600; }
+  .no { color: var(--bad); font-weight: 600; }
+  .status { font-weight: 600; }
+  #log { font-family: ui-monospace, Menlo, monospace; font-size: 12px; white-space: pre-wrap; max-height: 260px; overflow: auto; background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 10px; margin: 0 0 8px; }
+  details summary { cursor: pointer; font-weight: 600; min-height: 32px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Yazıcı testi</h1>
+    <p class="muted">Boon ERP saha uygulamasının Epson LX-350'ye Bluetooth üzerinden basıp basamayacağını dener. Faturadaki bilgiler örnektir; gerçek kayıt oluşturulmaz.</p>
+  </header>
+
+  <section class="card">
+    <h2>1. Bu telefon ve tarayıcı</h2>
+    <ul class="checks" id="env"></ul>
+  </section>
+
+  <section class="card">
+    <h2>2. Yazıcıya bağlan</h2>
+    <p class="muted">Önce <strong>A</strong>'yı deneyin. Listede yazıcı (ör. trk0557) çıkmazsa veya hata verirse <strong>B</strong>'yi deneyin.</p>
+    <div class="row" style="flex-direction: column">
+      <button id="connectSerial">A · Klasik Bluetooth (seri port)</button>
+      <button id="connectBle" class="secondary">B · Bluetooth LE</button>
+    </div>
+    <p class="status" id="connStatus" style="margin-top: 12px">Bağlı değil</p>
+  </section>
+
+  <section class="card">
+    <h2>3. Deneme baskıları</h2>
+    <label>Türkçe karakter ayarı
+      <select id="charset">
+        <option value="default">Yazıcının kendi ayarı (komut gönderme)</option>
+        <option value="pc857" selected>PC857 Türkçe ata (ESC ( t)</option>
+        <option value="ascii">Türkçe harfleri sadeleştir (ç→c, ş→s …)</option>
+      </select>
+    </label>
+    <details style="margin: 8px 0">
+      <summary>Gelişmiş: PC857 tablo kodu</summary>
+      <p class="muted">Türkçe harfler yanlış çıkarsa bu iki sayı değiştirilerek tekrar denenir (yazıcı kılavuzundaki "ESC ( t" tablosu).</p>
+      <div class="row">
+        <label>d2 <input id="tableD2" type="number" value="13" min="0" max="255"></label>
+        <label>d3 <input id="tableD3" type="number" value="0" min="0" max="255"></label>
+      </div>
+    </details>
+    <div class="row" style="flex-direction: column">
+      <button id="printBasic" disabled>Bağlantı testi (kısa)</button>
+      <button id="printRuler" disabled class="secondary">Cetvel (hizalama için)</button>
+      <button id="printForm" disabled class="secondary">Örnek fatura (matbu form)</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>4. Matbu form ayarı</h2>
+    <p class="muted">Cetveli basıp formdaki kutuların yerini milimetre olarak ölçün. Tüm alanları kaydırmak için genel kaydırmayı kullanın. Ayarlar bu telefonda saklanır.</p>
+    <div class="row">
+      <label>Genel kaydırma sağa (mm) <input id="offsetX" type="number" step="0.5" value="0"></label>
+      <label>Genel kaydırma aşağı (mm) <input id="offsetY" type="number" step="0.5" value="0"></label>
+    </div>
+    <label style="margin-top: 8px"><span><input id="formFeed" type="checkbox"> Baskı sonunda sayfa at (form feed)</span></label>
+    <label style="margin-top: 8px">Alanlar (her satır: ad; sağa mm; aşağı mm; değer)
+      <textarea id="layout" spellcheck="false"></textarea>
+    </label>
+    <div class="row" style="margin-top: 8px">
+      <button id="saveLayout" class="secondary">Kaydet</button>
+      <button id="resetLayout" class="secondary">Varsayılana dön</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>5. Sonuç</h2>
+    <p class="muted">Denemeden sonra bu raporu kopyalayıp gönderin; hangi yolun çalıştığını buradan anlarız.</p>
+    <pre id="log"></pre>
+    <button id="copyReport" class="secondary">Raporu kopyala</button>
+  </section>
+</main>
+
+<script>
+"use strict";
+
+// ---------- Sabitler ----------
+const SPP_UUID = "00001101-0000-1000-8000-00805f9b34fb"; // Klasik Bluetooth seri port profili
+// Bluetooth LE yazıcı adaptörlerinde yaygın "seri port gibi" servisler
+const BLE_SERVICES = [
+  "000018f0-0000-1000-8000-00805f9b34fb",
+  "e7810a71-73ae-499d-8c15-faa9aef0c3f2",
+  "49535343-fe7d-4ae5-8fa9-9fafd205e455",
+  "0000ffe0-0000-1000-8000-00805f9b34fb",
+  "0000ff00-0000-1000-8000-00805f9b34fb",
+  "6e400001-b5a3-f393-e0a9-e50e24dcca9e",
+];
+const ESC = 0x1b, CR = 0x0d, LF = 0x0a, FF = 0x0c;
+const MM_PER_INCH = 25.4;
+
+// Türkçe harflerin PC857 (Türkçe DOS) kod sayfasındaki karşılıkları
+const PC857 = {
+  "Ç": 0x80, "ü": 0x81, "é": 0x82, "â": 0x83, "ä": 0x84, "à": 0x85, "ç": 0x87, "ê": 0x88, "ë": 0x89,
+  "è": 0x8a, "ï": 0x8b, "î": 0x8c, "ı": 0x8d, "Ä": 0x8e, "Ö": 0x99, "Ü": 0x9a, "ö": 0x94, "û": 0x96,
+  "İ": 0x98, "Ş": 0x9e, "ş": 0x9f, "Ğ": 0xa6, "ğ": 0xa7,
+};
+const ASCII_FALLBACK = { "ç": "c", "Ç": "C", "ğ": "g", "Ğ": "G", "ı": "i", "İ": "I", "ö": "o", "Ö": "O", "ş": "s", "Ş": "S", "ü": "u", "Ü": "U", "₺": "TL" };
+
+// ---------- Örnek (sahte) fatura alanları; mm cinsinden, sol üst köşeden ----------
+const DEFAULT_LAYOUT = [
+  "Seri-No; 150; 20; A1-000123",
+  "Tarih; 150; 27; 18.11.2026",
+  "Unvan; 20; 42; Örnek Market Gıda Ltd. Şti.",
+  "Şube adresi; 20; 49; Deneme Mah. Örnek Sok. No:1 Çankaya",
+  "Vergi; 20; 56; Örnek VD 1234567890",
+  "Satır 1 ürün; 15; 80; Portakal Suyu 1 L",
+  "Satır 1 miktar; 100; 80; 2 koli = 12 adet",
+  "Satır 1 fiyat; 140; 80; 45,00",
+  "Satır 1 tutar; 170; 80; 540,00",
+  "Satır 2 ürün; 15; 86; Nar Suyu 250 ml",
+  "Satır 2 miktar; 100; 86; 24 adet",
+  "Satır 2 fiyat; 140; 86; 30,00",
+  "Satır 2 tutar; 170; 86; 720,00",
+  "Ara toplam; 170; 190; 1.260,00",
+  "KDV %1; 170; 196; 12,60",
+  "Genel toplam; 170; 202; 1.272,60",
+  "Yazıyla; 20; 202; Binikiyüzyetmişiki TL Altmış Kr",
+].join("\n");
+
+// ---------- ESC/P komut üretimi (test edilebilir saf fonksiyonlar) ----------
+function encodeText(text, charset) {
+  const out = [];
+  for (const ch of text) {
+    if (charset === "ascii") {
+      const s = ASCII_FALLBACK[ch] ?? ch;
+      for (const c of s) out.push(c.charCodeAt(0) < 128 ? c.charCodeAt(0) : 0x3f);
+      continue;
+    }
+    const code = ch.charCodeAt(0);
+    if (code < 128) out.push(code);
+    else if (PC857[ch]) out.push(PC857[ch]);
+    else if (ASCII_FALLBACK[ch]) for (const c of ASCII_FALLBACK[ch]) out.push(c.charCodeAt(0));
+    else out.push(0x3f); // ?
+  }
+  return out;
+}
+
+function initCommands(charset, d2, d3) {
+  const bytes = [ESC, 0x40]; // ESC @ : yazıcıyı sıfırla
+  if (charset === "pc857") {
+    // ESC ( t 3 0 1 d2 d3 : 1 numaralı tabloya kod sayfası ata; ESC t 1 : o tabloyu seç
+    bytes.push(ESC, 0x28, 0x74, 3, 0, 1, d2 & 0xff, d3 & 0xff, ESC, 0x74, 1);
+  }
+  return bytes;
+}
+
+/** Dikey ilerleme: ESC J n (n/216 inç), 255'ten büyükse parçalara bölünür. */
+function feedUnits(units) {
+  const out = [];
+  let left = Math.max(0, Math.round(units));
+  while (left > 0) {
+    const n = Math.min(255, left);
+    out.push(ESC, 0x4a, n);
+    left -= n;
+  }
+  return out;
+}
+
+/** Yatay mutlak konum: ESC $ nL nH (1/60 inç). */
+function moveX(mm) {
+  const units = Math.max(0, Math.round((mm / MM_PER_INCH) * 60));
+  return [ESC, 0x24, units & 0xff, (units >> 8) & 0xff];
+}
+
+function parseLayout(text) {
+  return text.split("\n").map((line) => line.trim()).filter(Boolean).map((line, i) => {
+    const parts = line.split(";").map((p) => p.trim());
+    const [name, x, y, ...rest] = parts;
+    const value = rest.join(";");
+    if (parts.length < 4 || Number.isNaN(Number(x)) || Number.isNaN(Number(y)))
+      throw new Error(`${i + 1}. satır anlaşılamadı: "${line}"`);
+    return { name, x: Number(x), y: Number(y), value };
+  });
+}
+
+function buildForm(fields, opts) {
+  const bytes = initCommands(opts.charset, opts.d2, opts.d3);
+  const sorted = [...fields].sort((a, b) => a.y - b.y || a.x - b.x);
+  let currentUnits = 0; // 1/216 inç
+  for (const f of sorted) {
+    const targetUnits = Math.round(((f.y + opts.offsetY) / MM_PER_INCH) * 216);
+    if (targetUnits > currentUnits) {
+      bytes.push(...feedUnits(targetUnits - currentUnits));
+      currentUnits = targetUnits;
+    }
+    bytes.push(CR, ...moveX(f.x + opts.offsetX), ...encodeText(f.value, opts.charset));
+  }
+  bytes.push(CR, LF);
+  if (opts.formFeed) bytes.push(FF);
+  return new Uint8Array(bytes);
+}
+
+function buildBasic(opts) {
+  const lines = [
+    "BOON YAZICI TESTI",
+    "ASCII: ABC abc 0123456789 -+/.,",
+    "Turkce: ÇĞİÖŞÜ çğıöşü",
+    new Date().toLocaleString("tr-TR"),
+  ];
+  const bytes = initCommands(opts.charset, opts.d2, opts.d3);
+  for (const l of lines) bytes.push(...encodeText(l, opts.charset), CR, LF);
+  bytes.push(CR, LF, CR, LF);
+  return new Uint8Array(bytes);
+}
+
+/** Yatayda her 10 mm'de bir işaret, dikeyde her 10 mm'de bir satır: formdaki kutuların yerini ölçmek için. */
+function buildRuler(opts) {
+  const bytes = initCommands(opts.charset, opts.d2, opts.d3);
+  let currentUnits = 0;
+  for (let y = 10; y <= 120; y += 10) {
+    const target = Math.round(((y + opts.offsetY) / MM_PER_INCH) * 216);
+    bytes.push(...feedUnits(target - currentUnits));
+    currentUnits = target;
+    for (let x = 0; x <= 190; x += 10) {
+      bytes.push(CR, ...moveX(x + opts.offsetX), ...encodeText(x === 0 ? `|${y}` : `|${x}`, "ascii"));
+    }
+  }
+  bytes.push(CR, LF);
+  if (opts.formFeed) bytes.push(FF);
+  return new Uint8Array(bytes);
+}
+
+window.__printerTest = { encodeText, initCommands, feedUnits, moveX, parseLayout, buildForm, buildBasic, buildRuler, DEFAULT_LAYOUT };
+
+// ---------- Arayüz ----------
+const $ = (id) => document.getElementById(id);
+const logLines = [];
+function log(msg) {
+  const line = `${new Date().toLocaleTimeString("tr-TR")}  ${msg}`;
+  logLines.push(line);
+  $("log").textContent = logLines.join("\n");
+  $("log").scrollTop = $("log").scrollHeight;
+}
+
+const STORAGE_KEY = "boon-printer-test";
+function loadSettings() {
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}"); } catch { return {}; }
+}
+function saveSettings() {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      layout: $("layout").value, offsetX: $("offsetX").value, offsetY: $("offsetY").value,
+      charset: $("charset").value, d2: $("tableD2").value, d3: $("tableD3").value, formFeed: $("formFeed").checked,
+    }));
+  } catch { /* depolama kapalı */ }
+}
+const s = loadSettings();
+$("layout").value = s.layout ?? DEFAULT_LAYOUT;
+if (s.offsetX != null) $("offsetX").value = s.offsetX;
+if (s.offsetY != null) $("offsetY").value = s.offsetY;
+if (s.charset) $("charset").value = s.charset;
+if (s.d2 != null) $("tableD2").value = s.d2;
+if (s.d3 != null) $("tableD3").value = s.d3;
+$("formFeed").checked = !!s.formFeed;
+
+function options() {
+  return {
+    charset: $("charset").value,
+    d2: Number($("tableD2").value), d3: Number($("tableD3").value),
+    offsetX: Number($("offsetX").value) || 0, offsetY: Number($("offsetY").value) || 0,
+    formFeed: $("formFeed").checked,
+  };
+}
+
+// Ortam kontrolleri
+const env = {
+  "Güvenli bağlantı (HTTPS)": window.isSecureContext,
+  "Klasik Bluetooth / seri port (Web Serial)": "serial" in navigator,
+  "Bluetooth LE (Web Bluetooth)": "bluetooth" in navigator,
+};
+for (const [name, ok] of Object.entries(env)) {
+  const li = document.createElement("li");
+  li.innerHTML = `<span class="${ok ? "yes" : "no"}">${ok ? "Var" : "Yok"}</span> · ${name}`;
+  $("env").appendChild(li);
+}
+log(`Tarayıcı: ${navigator.userAgent}`);
+log(`Destek: ${Object.entries(env).map(([k, v]) => `${k}=${v ? "var" : "yok"}`).join(", ")}`);
+
+// Bağlantı
+let send = null;
+function setConnected(label, sender) {
+  send = sender;
+  $("connStatus").textContent = label;
+  $("connStatus").style.color = sender ? "var(--ok)" : "var(--text)";
+  for (const id of ["printBasic", "printRuler", "printForm"]) $(id).disabled = !sender;
+}
+
+$("connectSerial").addEventListener("click", async () => {
+  if (!("serial" in navigator)) return log("A: Bu tarayıcıda seri port (Web Serial) desteği yok.");
+  try {
+    log("A: Cihaz seçimi açılıyor…");
+    const port = await navigator.serial.requestPort({
+      filters: [{ bluetoothServiceClassId: SPP_UUID }],
+      allowedBluetoothServiceClassIds: [SPP_UUID],
+    });
+    const info = port.getInfo ? port.getInfo() : {};
+    log(`A: Seçildi ${JSON.stringify(info)}`);
+    await port.open({ baudRate: 9600 });
+    log("A: Bağlantı açıldı.");
+    setConnected("Bağlı · A (klasik Bluetooth)", async (bytes) => {
+      const writer = port.writable.getWriter();
+      try { await writer.write(bytes); } finally { writer.releaseLock(); }
+    });
+  } catch (e) {
+    log(`A: Hata: ${e.name}: ${e.message}`);
+  }
+});
+
+$("connectBle").addEventListener("click", async () => {
+  if (!("bluetooth" in navigator)) return log("B: Bu tarayıcıda Bluetooth LE (Web Bluetooth) desteği yok.");
+  try {
+    log("B: Cihaz seçimi açılıyor…");
+    const device = await navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: BLE_SERVICES });
+    log(`B: Seçildi: ${device.name ?? "(adsız)"}`);
+    const server = await device.gatt.connect();
+    const services = await server.getPrimaryServices();
+    log(`B: Servisler: ${services.map((sv) => sv.uuid).join(", ") || "(yok)"}`);
+    let target = null;
+    for (const sv of services) {
+      for (const ch of await sv.getCharacteristics()) {
+        if (!target && (ch.properties.writeWithoutResponse || ch.properties.write)) target = ch;
+      }
+    }
+    if (!target) return log("B: Yazılabilir karakteristik bulunamadı; bu adaptör LE ile basmayı desteklemiyor olabilir.");
+    log(`B: Yazma noktası: ${target.uuid}`);
+    setConnected("Bağlı · B (Bluetooth LE)", async (bytes) => {
+      const chunk = 20;
+      for (let i = 0; i < bytes.length; i += chunk) {
+        const part = bytes.slice(i, i + chunk);
+        if (target.properties.writeWithoutResponse) await target.writeValueWithoutResponse(part);
+        else await target.writeValueWithResponse(part);
+      }
+    });
+  } catch (e) {
+    log(`B: Hata: ${e.name}: ${e.message}`);
+  }
+});
+
+async function print(name, build) {
+  if (!send) return;
+  try {
+    saveSettings();
+    const bytes = build();
+    log(`${name}: ${bytes.length} bayt gönderiliyor…`);
+    await send(bytes);
+    log(`${name}: Gönderildi. Kâğıda bakın.`);
+  } catch (e) {
+    log(`${name}: Hata: ${e.name ?? ""} ${e.message}`);
+  }
+}
+$("printBasic").addEventListener("click", () => print("Bağlantı testi", () => buildBasic(options())));
+$("printRuler").addEventListener("click", () => print("Cetvel", () => buildRuler(options())));
+$("printForm").addEventListener("click", () => print("Örnek fatura", () => buildForm(parseLayout($("layout").value), options())));
+
+$("saveLayout").addEventListener("click", () => {
+  try { parseLayout($("layout").value); saveSettings(); log("Form ayarı kaydedildi."); }
+  catch (e) { log(`Form ayarı: ${e.message}`); }
+});
+$("resetLayout").addEventListener("click", () => { $("layout").value = DEFAULT_LAYOUT; saveSettings(); log("Form ayarı varsayılana döndü."); });
+
+$("copyReport").addEventListener("click", async () => {
+  const report = [...logLines, "", "Form ayarı:", $("layout").value, `Kaydırma: x=${$("offsetX").value} y=${$("offsetY").value}, karakter: ${$("charset").value} (${$("tableD2").value},${$("tableD3").value})`].join("\n");
+  try { await navigator.clipboard.writeText(report); log("Rapor panoya kopyalandı."); }
+  catch { log("Kopyalanamadı; yukarıdaki metni elle seçip kopyalayın."); }
+});
+</script>
+</body>
+</html>
