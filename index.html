@@ -68,9 +68,16 @@
     <h2>3. Deneme baskıları</h2>
     <label>Türkçe karakter ayarı
       <select id="charset">
-        <option value="default">Yazıcının kendi ayarı (komut gönderme)</option>
-        <option value="pc857" selected>PC857 Türkçe ata (ESC ( t)</option>
+        <option value="default" selected>Yazıcının kendi ayarı (önerilen)</option>
+        <option value="pc857">PC857 Türkçe ata (ESC ( t)</option>
         <option value="ascii">Türkçe harfleri sadeleştir (ç→c, ş→s …)</option>
+      </select>
+    </label>
+    <label style="margin-top: 8px">Yazı sıklığı
+      <select id="cpi">
+        <option value="10">10 cpi (geniş, 2,5 mm/karakter)</option>
+        <option value="12" selected>12 cpi (2,1 mm/karakter)</option>
+        <option value="15">15 cpi (dar, 1,7 mm/karakter)</option>
       </select>
     </label>
     <details style="margin: 8px 0">
@@ -96,7 +103,7 @@
       <label>Genel kaydırma aşağı (mm) <input id="offsetY" type="number" step="0.5" value="0"></label>
     </div>
     <label style="margin-top: 8px"><span><input id="formFeed" type="checkbox"> Baskı sonunda sayfa at (form feed)</span></label>
-    <label style="margin-top: 8px">Alanlar (her satır: ad; sağa mm; aşağı mm; değer)
+    <label style="margin-top: 8px">Alanlar (her satır: ad; sağa mm; aşağı mm; değer; isteğe bağlı "sağ" = o noktada biten sağa yaslı yazı)
       <textarea id="layout" spellcheck="false"></textarea>
     </label>
     <div class="row" style="margin-top: 8px">
@@ -129,6 +136,9 @@ const BLE_SERVICES = [
 ];
 const ESC = 0x1b, CR = 0x0d, LF = 0x0a, FF = 0x0c;
 const MM_PER_INCH = 25.4;
+const CPI_COMMANDS = { 10: [ESC, 0x50], 12: [ESC, 0x4d], 15: [ESC, 0x67] }; // ESC P / ESC M / ESC g
+const mmPerChar = (cpi) => MM_PER_INCH / cpi;
+const MAX_PRINT_MM = 8 * MM_PER_INCH; // LX-350 en fazla 8 inç (203,2 mm) genişliğe basar
 
 // Türkçe harflerin PC857 (Türkçe DOS) kod sayfasındaki karşılıkları
 const PC857 = {
@@ -139,24 +149,43 @@ const PC857 = {
 const ASCII_FALLBACK = { "ç": "c", "Ç": "C", "ğ": "g", "Ğ": "G", "ı": "i", "İ": "I", "ö": "o", "Ö": "O", "ş": "s", "Ş": "S", "ü": "u", "Ü": "U", "₺": "TL" };
 
 // ---------- Örnek (sahte) fatura alanları; mm cinsinden, sol üst köşeden ----------
+// BizimHesap faturasının alan düzeni (yatay konumlar ondan alındı; dikey konum cetvelle kalibre edilecek).
+// Toplamlar BizimHesap'ta 205 mm'de bitiyor; yazıcı sınırı 203,2 mm olduğu için 203 alındı.
+// Tüm değerler sahtedir.
 const DEFAULT_LAYOUT = [
-  "Seri-No; 150; 20; A1-000123",
-  "Tarih; 150; 27; 18.11.2026",
-  "Unvan; 20; 42; Örnek Market Gıda Ltd. Şti.",
-  "Şube adresi; 20; 49; Deneme Mah. Örnek Sok. No:1 Çankaya",
-  "Vergi; 20; 56; Örnek VD 1234567890",
-  "Satır 1 ürün; 15; 80; Portakal Suyu 1 L",
-  "Satır 1 miktar; 100; 80; 2 koli = 12 adet",
-  "Satır 1 fiyat; 140; 80; 45,00",
-  "Satır 1 tutar; 170; 80; 540,00",
-  "Satır 2 ürün; 15; 86; Nar Suyu 250 ml",
-  "Satır 2 miktar; 100; 86; 24 adet",
-  "Satır 2 fiyat; 140; 86; 30,00",
-  "Satır 2 tutar; 170; 86; 720,00",
-  "Ara toplam; 170; 190; 1.260,00",
-  "KDV %1; 170; 196; 12,60",
-  "Genel toplam; 170; 202; 1.272,60",
-  "Yazıyla; 20; 202; Binikiyüzyetmişiki TL Altmış Kr",
+  "Tarih; 168.8; 19; 18.11.2026",
+  "Unvan; 6.9; 30.9; ÖRNEK MARKET GIDA LTD.",
+  "Şube; 122.8; 30.9; MERKEZ ŞUBE",
+  "Adres; 9; 41; DENEME SOK. NO:1 ÖRNEKKÖY / GİRNE",
+  "Şehir; 9.8; 50; GİRNE",
+  "Vergi no; 36; 50; MŞ00000",
+  "Satır 1 açıklama; 30.4; 64.8; PORTAKAL SUYU * 1-LT",
+  "Satır 1 miktar; 94.7; 64.8; 12 AD",
+  "Satır 1 fiyat; 127.2; 64.8; 45,00 TL; sağ",
+  "Satır 1 iskonto; 136.3; 64.8; % 10",
+  "Satır 1 tutar; 179.6; 64.8; 486,00 TL; sağ",
+  "Satır 1 KDV; 187.6; 64.8; %10",
+  "Satır 2 açıklama; 30.4; 69.8; NAR SUYU * 250-ML",
+  "Satır 2 miktar; 94.7; 69.8; 24 AD",
+  "Satır 2 fiyat; 127.2; 69.8; 30,00 TL; sağ",
+  "Satır 2 iskonto; 136.3; 69.8; % 0",
+  "Satır 2 tutar; 179.6; 69.8; 720,00 TL; sağ",
+  "Satır 2 KDV; 187.6; 69.8; %10",
+  "Brüt etiket; 165.9; 183.9; BRÜT",
+  "Brüt; 203; 183.9; 1.260,00 TL; sağ",
+  "İndirim etiket; 165.9; 188.9; İNDİRİM",
+  "İndirim; 203; 188.9; 54,00 TL; sağ",
+  "Net etiket; 165.9; 193.9; NET",
+  "Net; 203; 193.9; 1.206,00 TL; sağ",
+  "KDV etiket; 165.9; 198.9; KDV",
+  "KDV; 203; 198.9; 120,60 TL; sağ",
+  "Toplam etiket; 165.9; 202.9; TOPLAM",
+  "Toplam; 203; 202.9; 1.326,60 TL; sağ",
+  "Yazıyla; 196; 207.9; BinÜçYüzYirmiAltıTL,AltmışKr.; sağ",
+  "Hesap başlık; 6.9; 192.9; HESAP BİLGİLERİ",
+  "Banka; 6.9; 200.8; ÖRNEK BANKA IBAN",
+  "IBAN; 6.9; 204.8; TR00 0000 0000 0000 0000 0000 00",
+  "Bakiye; 7.9; 234.9; Güncel bakiyeniz : 12.345,67 TL",
 ].join("\n");
 
 // ---------- ESC/P komut üretimi (test edilebilir saf fonksiyonlar) ----------
@@ -177,8 +206,8 @@ function encodeText(text, charset) {
   return out;
 }
 
-function initCommands(charset, d2, d3) {
-  const bytes = [ESC, 0x40]; // ESC @ : yazıcıyı sıfırla
+function initCommands(charset, d2, d3, cpi = 10) {
+  const bytes = [ESC, 0x40, ...(CPI_COMMANDS[cpi] ?? CPI_COMMANDS[10])]; // ESC @ : sıfırla, ardından yazı sıklığı
   if (charset === "pc857") {
     // ESC ( t 3 0 1 d2 d3 : 1 numaralı tabloya kod sayfası ata; ESC t 1 : o tabloyu seç
     bytes.push(ESC, 0x28, 0x74, 3, 0, 1, d2 & 0xff, d3 & 0xff, ESC, 0x74, 1);
@@ -207,16 +236,17 @@ function moveX(mm) {
 function parseLayout(text) {
   return text.split("\n").map((line) => line.trim()).filter(Boolean).map((line, i) => {
     const parts = line.split(";").map((p) => p.trim());
-    const [name, x, y, ...rest] = parts;
-    const value = rest.join(";");
-    if (parts.length < 4 || Number.isNaN(Number(x)) || Number.isNaN(Number(y)))
+    const [name, x, y, value, align] = parts;
+    if (parts.length < 4 || parts.length > 5 || Number.isNaN(Number(x)) || Number.isNaN(Number(y)))
       throw new Error(`${i + 1}. satır anlaşılamadı: "${line}"`);
-    return { name, x: Number(x), y: Number(y), value };
+    if (align && !["sağ", "sag", "sol"].includes(align.toLocaleLowerCase("tr")))
+      throw new Error(`${i + 1}. satırda hiza "sağ" veya "sol" olmalı: "${line}"`);
+    return { name, x: Number(x), y: Number(y), value, right: !!align && align.toLocaleLowerCase("tr") !== "sol" };
   });
 }
 
 function buildForm(fields, opts) {
-  const bytes = initCommands(opts.charset, opts.d2, opts.d3);
+  const bytes = initCommands(opts.charset, opts.d2, opts.d3, opts.cpi);
   const sorted = [...fields].sort((a, b) => a.y - b.y || a.x - b.x);
   let currentUnits = 0; // 1/216 inç
   for (const f of sorted) {
@@ -225,7 +255,15 @@ function buildForm(fields, opts) {
       bytes.push(...feedUnits(targetUnits - currentUnits));
       currentUnits = targetUnits;
     }
-    bytes.push(CR, ...moveX(f.x + opts.offsetX), ...encodeText(f.value, opts.charset));
+    // Sağa yaslı alanda x, yazının bittiği noktadır.
+    const width = [...f.value].length * mmPerChar(opts.cpi ?? 10);
+    let startX = (f.right ? f.x - width : f.x) + opts.offsetX;
+    if (startX + width > MAX_PRINT_MM) {
+      // Satır sonunu aşan yazı bir alt satıra kayar; sola çekilir ve uyarılır.
+      opts.onWarn?.(`"${f.name}" ${(startX + width).toFixed(1)} mm'de bitiyor, yazıcı sınırı ${MAX_PRINT_MM.toFixed(1)} mm; sola çekildi.`);
+      startX = MAX_PRINT_MM - width;
+    }
+    bytes.push(CR, ...moveX(startX), ...encodeText(f.value, opts.charset));
   }
   bytes.push(CR, LF);
   if (opts.formFeed) bytes.push(FF);
@@ -239,17 +277,17 @@ function buildBasic(opts) {
     "Turkce: ÇĞİÖŞÜ çğıöşü",
     new Date().toLocaleString("tr-TR"),
   ];
-  const bytes = initCommands(opts.charset, opts.d2, opts.d3);
+  const bytes = initCommands(opts.charset, opts.d2, opts.d3, opts.cpi);
   for (const l of lines) bytes.push(...encodeText(l, opts.charset), CR, LF);
   bytes.push(CR, LF, CR, LF);
   return new Uint8Array(bytes);
 }
 
-/** Yatayda her 10 mm'de bir işaret, dikeyde her 10 mm'de bir satır: formdaki kutuların yerini ölçmek için. */
+/** Yatayda her 10 mm'de bir işaret, dikeyde tam sayfa boyunca her 10 mm'de bir satır: formdaki kutuların yerini ölçmek için. */
 function buildRuler(opts) {
-  const bytes = initCommands(opts.charset, opts.d2, opts.d3);
+  const bytes = initCommands(opts.charset, opts.d2, opts.d3, 10);
   let currentUnits = 0;
-  for (let y = 10; y <= 120; y += 10) {
+  for (let y = 10; y <= 280; y += 10) {
     const target = Math.round(((y + opts.offsetY) / MM_PER_INCH) * 216);
     bytes.push(...feedUnits(target - currentUnits));
     currentUnits = target;
@@ -262,7 +300,7 @@ function buildRuler(opts) {
   return new Uint8Array(bytes);
 }
 
-window.__printerTest = { encodeText, initCommands, feedUnits, moveX, parseLayout, buildForm, buildBasic, buildRuler, DEFAULT_LAYOUT };
+window.__printerTest = { MAX_PRINT_MM, encodeText, initCommands, feedUnits, moveX, mmPerChar, parseLayout, buildForm, buildBasic, buildRuler, DEFAULT_LAYOUT };
 
 // ---------- Arayüz ----------
 const $ = (id) => document.getElementById(id);
@@ -274,7 +312,7 @@ function log(msg) {
   $("log").scrollTop = $("log").scrollHeight;
 }
 
-const STORAGE_KEY = "boon-printer-test";
+const STORAGE_KEY = "boon-printer-test-v2"; // v2: BizimHesap düzeni; eski kayıtlı ayarlar kullanılmaz
 function loadSettings() {
   try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}"); } catch { return {}; }
 }
@@ -282,7 +320,7 @@ function saveSettings() {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
       layout: $("layout").value, offsetX: $("offsetX").value, offsetY: $("offsetY").value,
-      charset: $("charset").value, d2: $("tableD2").value, d3: $("tableD3").value, formFeed: $("formFeed").checked,
+      charset: $("charset").value, cpi: $("cpi").value, d2: $("tableD2").value, d3: $("tableD3").value, formFeed: $("formFeed").checked,
     }));
   } catch { /* depolama kapalı */ }
 }
@@ -291,6 +329,7 @@ $("layout").value = s.layout ?? DEFAULT_LAYOUT;
 if (s.offsetX != null) $("offsetX").value = s.offsetX;
 if (s.offsetY != null) $("offsetY").value = s.offsetY;
 if (s.charset) $("charset").value = s.charset;
+if (s.cpi) $("cpi").value = s.cpi;
 if (s.d2 != null) $("tableD2").value = s.d2;
 if (s.d3 != null) $("tableD3").value = s.d3;
 $("formFeed").checked = !!s.formFeed;
@@ -298,6 +337,7 @@ $("formFeed").checked = !!s.formFeed;
 function options() {
   return {
     charset: $("charset").value,
+    cpi: Number($("cpi").value),
     d2: Number($("tableD2").value), d3: Number($("tableD3").value),
     offsetX: Number($("offsetX").value) || 0, offsetY: Number($("offsetY").value) || 0,
     formFeed: $("formFeed").checked,
@@ -383,7 +423,8 @@ async function print(name, build) {
   try {
     saveSettings();
     const bytes = build();
-    log(`${name}: ${bytes.length} bayt gönderiliyor…`);
+    const o = options();
+    log(`${name}: ${bytes.length} bayt gönderiliyor (karakter: ${o.charset}, ${o.cpi} cpi, kaydırma x=${o.offsetX} y=${o.offsetY})…`);
     await send(bytes);
     log(`${name}: Gönderildi. Kâğıda bakın.`);
   } catch (e) {
@@ -392,7 +433,8 @@ async function print(name, build) {
 }
 $("printBasic").addEventListener("click", () => print("Bağlantı testi", () => buildBasic(options())));
 $("printRuler").addEventListener("click", () => print("Cetvel", () => buildRuler(options())));
-$("printForm").addEventListener("click", () => print("Örnek fatura", () => buildForm(parseLayout($("layout").value), options())));
+$("printForm").addEventListener("click", () =>
+  print("Örnek fatura", () => buildForm(parseLayout($("layout").value), { ...options(), onWarn: (m) => log(`Uyarı: ${m}`) })));
 
 $("saveLayout").addEventListener("click", () => {
   try { parseLayout($("layout").value); saveSettings(); log("Form ayarı kaydedildi."); }
@@ -401,7 +443,7 @@ $("saveLayout").addEventListener("click", () => {
 $("resetLayout").addEventListener("click", () => { $("layout").value = DEFAULT_LAYOUT; saveSettings(); log("Form ayarı varsayılana döndü."); });
 
 $("copyReport").addEventListener("click", async () => {
-  const report = [...logLines, "", "Form ayarı:", $("layout").value, `Kaydırma: x=${$("offsetX").value} y=${$("offsetY").value}, karakter: ${$("charset").value} (${$("tableD2").value},${$("tableD3").value})`].join("\n");
+  const report = [...logLines, "", "Form ayarı:", $("layout").value, `Kaydırma: x=${$("offsetX").value} y=${$("offsetY").value}, karakter: ${$("charset").value} (${$("tableD2").value},${$("tableD3").value}), yazı sıklığı: ${$("cpi").value} cpi`].join("\n");
   try { await navigator.clipboard.writeText(report); log("Rapor panoya kopyalandı."); }
   catch { log("Kopyalanamadı; yukarıdaki metni elle seçip kopyalayın."); }
 });
